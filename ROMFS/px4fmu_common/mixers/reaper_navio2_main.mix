@@ -1,0 +1,60 @@
+Reaper quad mixer for Navio2
+============================
+
+First mixer is for the throttle. Since one motor the first is reserved for this.
+Control group 3 - Channel 5: Actual the motor RPM is set with the FLAB GYRO switcher (MIN/50%/70%)
+(S) <group> <index> <-ve scale> <+ve scale> <offset> <lower limit> <upper limit>
+
+
+M: 1
+O:      10000  10000      0 -10000  10000
+S: 3 5  10000  10000      0 -10000  10000
+
+Servo outputs for the other control commands 
+
+Output 2
+--------
+This mixer is empty.
+
+Z:
+
+Servo 1-4 roll, pitch, yaw, throttle 
+--------
+Servo 1 
+
+M: 4
+O:      10000  10000      0 		-10000  10000
+S: 0 0  8000	8000      0			-10000  0
+S: 0 1  8000  	8000      0			-10000  0
+S: 0 2 	5000  	5000      0 		-10000	0  		
+S: 0 3  -20000  -20000      10000	-10000  10000
+
+Servo 2
+
+M: 4
+O:      10000	10000		0		-10000	10000
+S: 0 0  8000	8000		0 		0		10000
+S: 0 1  -8000	-8000		0		0		10000
+S: 0 2  5000	5000		0		0		10000
+S: 0 3  20000	20000		-10000	-10000  10000
+
+Servo 3
+
+M: 4
+O:      10000  	10000      0 		-10000	10000
+S: 0 0  -8000 -8000      0 		-10000  0
+S: 0 1  -8000 -8000      0 		-10000  0
+S: 0 2  5000   5000      0 		-10000  0
+S: 0 3  -20000  	-20000      10000 	-10000  10000
+
+Servo 4
+
+M: 4
+O:      10000	10000		0		-10000	10000
+S: 0 0  -8000	-8000		0		0		10000
+S: 0 1  8000	8000		0 		0		10000
+S: 0 2  5000	5000		0		0		10000
+S: 0 3  20000	20000		-10000	-10000  10000
+
+
+
