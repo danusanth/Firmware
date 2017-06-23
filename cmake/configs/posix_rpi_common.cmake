@@ -104,6 +104,9 @@ set(config_module_list
 	platforms/common
 	platforms/posix/px4_layer
 	platforms/posix/work_queue
+
+	#
+	examples/px4_simple_app
 )
 
 #
