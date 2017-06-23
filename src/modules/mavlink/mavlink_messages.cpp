@@ -53,6 +53,8 @@
 #include <px4_time.h>
 #include <systemlib/err.h>
 #include <systemlib/mavlink_log.h>
+#include <v1.0/common/mavlink_msg_variable_pitch_angle.h>
+
 
 #include <uORB/topics/actuator_armed.h>
 #include <uORB/topics/actuator_controls.h>
@@ -4069,6 +4071,67 @@ protected:
 	}
 };
 
+class MavlinkStreamVariablePitchAngle : public MavlinkStream
+{
+public:
+    const char *get_name() const
+    {
+        return MavlinkStreamVariablePitchAngle::get_name_static();
+    }
+    static const char *get_name_static()
+    {
+        return "VARIABLE_PITCH_ANGLE";
+    }
+    static uint16_t get_id_static()
+    {
+            return MAVLINK_MSG_ID_VARIABLE_PITCH_ANGLE;
+    }
+
+    uint16_t get_id()
+    {
+            return get_id_static();
+    }
+    static MavlinkStream *new_instance(Mavlink *mavlink)
+    {
+        return new MavlinkStreamVariablePitchAngle(mavlink);
+    }
+    unsigned get_size()
+    {
+        return MAVLINK_MSG_ID_VARIABLE_PITCH_ANGLE_LEN + MAVLINK_NUM_NON_PAYLOAD_BYTES;
+    }
+
+private:
+    MavlinkOrbSubscription *_sub;
+    uint64_t _var_pitch_ang_time;
+
+    /* do not allow top copying this class */
+    MavlinkStreamVariablePitchAngle(MavlinkStreamVariablePitchAngle &);
+    MavlinkStreamVariablePitchAngle& operator = (const MavlinkStreamVariablePitchAngle &);
+
+protected:
+    explicit MavlinkStreamVariablePitchAngle(Mavlink *mavlink) : MavlinkStream(mavlink),
+        _sub(_mavlink->add_orb_subscription(ORB_ID(actuator_outputs))),  // make sure you enter the name of your uORB topic here
+        _var_pitch_ang_time(0)
+    {}
+
+    void send(const hrt_abstime t)
+    {
+        struct actuator_outputs_s _servo_outputs;    //make sure xxx_s is the definition of your uORB topic
+
+        if (_sub->update(&_var_pitch_ang_time, &_servo_outputs)) {
+            mavlink_variable_pitch_angle_t _msg_servo_outputs;  //make sure mavlink_xxx_t is the definition of your custom mavlink message
+
+            _msg_servo_outputs.time_usec = t;
+            _msg_servo_outputs.angle_servo1 = _servo_outputs.output[2]*-20; // max range is 20 deg for the PWM MIN 1200 & 1800
+            _msg_servo_outputs.angle_servo2 = _servo_outputs.output[3]*20;
+            _msg_servo_outputs.angle_servo3 =_servo_outputs.output[4]*-20;
+            _msg_servo_outputs.angle_servo4 = _servo_outputs.output[5]*20;
+
+            mavlink_msg_variable_pitch_angle_send_struct(_mavlink->get_channel(), &_msg_servo_outputs);
+        }
+    }
+};
+
 const StreamListItem *streams_list[] = {
 	new StreamListItem(&MavlinkStreamHeartbeat::new_instance, &MavlinkStreamHeartbeat::get_name_static, &MavlinkStreamHeartbeat::get_id_static),
 	new StreamListItem(&MavlinkStreamStatustext::new_instance, &MavlinkStreamStatustext::get_name_static, &MavlinkStreamStatustext::get_id_static),
@@ -4118,5 +4181,6 @@ const StreamListItem *streams_list[] = {
 	new StreamListItem(&MavlinkStreamMountOrientation::new_instance, &MavlinkStreamMountOrientation::get_name_static, &MavlinkStreamMountOrientation::get_id_static),
 	new StreamListItem(&MavlinkStreamHighLatency::new_instance, &MavlinkStreamHighLatency::get_name_static, &MavlinkStreamWind::get_id_static),
 	new StreamListItem(&MavlinkStreamGroundTruth::new_instance, &MavlinkStreamGroundTruth::get_name_static, &MavlinkStreamGroundTruth::get_id_static),
+        new StreamListItem(&MavlinkStreamVariablePitchAngle::new_instance, &MavlinkStreamVariablePitchAngle::get_name_static, &MavlinkStreamVariablePitchAngle::get_id_static),
 	nullptr
 };

@@ -46,30 +46,70 @@
 #include <poll.h>
 #include <string.h>
 #include <math.h>
+#include <drivers/drv_hrt.h>
 
 #include <uORB/uORB.h>
 #include <uORB/topics/sensor_combined.h>
 #include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/input_rc.h>
+#include <uORB/topics/actuator_controls.h>
+#include <uORB/topics/actuator_armed.h>
+#include <uORB/topics/actuator_outputs.h>
 
 __EXPORT int px4_simple_app_main(int argc, char *argv[]);
 
 int px4_simple_app_main(int argc, char *argv[])
 {
-	PX4_INFO("Hello Sky!");
+	PX4_INFO("Hello Navio2!");
 
 	/* subscribe to sensor_combined topic */
 	int sensor_sub_fd = orb_subscribe(ORB_ID(sensor_combined));
+	int actuator_output_sub_fd = orb_subscribe(ORB_ID(actuator_outputs));
 	/* limit the update rate to 5 Hz */
 	orb_set_interval(sensor_sub_fd, 200);
+	orb_set_interval(actuator_output_sub_fd, 200);
 
-	/* advertise attitude topic */
+	/* advertise attitude topic 
 	struct vehicle_attitude_s att;
 	memset(&att, 0, sizeof(att));
 	orb_advert_t att_pub = orb_advertise(ORB_ID(vehicle_attitude), &att);
+	*/
+
+	/* advertise servo/actuator topic */
+	struct actuator_controls_s actuators;
+	memset(&actuators, 0, sizeof(actuators));
+	orb_advert_t actuator_pub_ptr = orb_advertise(ORB_ID(actuator_controls_0), &actuators);
+
+	/* advertise armed topic */
+	struct actuator_armed_s arm;
+	memset(&arm, 0 , sizeof(arm));
+
+	arm.timestamp = hrt_absolute_time();
+	arm.ready_to_arm = true;
+	arm.armed = true;
+	orb_advert_t arm_pub_ptr = orb_advertise(ORB_ID(actuator_armed), &arm);
+	orb_publish(ORB_ID(actuator_armed), arm_pub_ptr, &arm);
+
+	/* read back values to validate */
+	int arm_sub_fd = orb_subscribe(ORB_ID(actuator_armed));
+	orb_copy(ORB_ID(actuator_armed), arm_sub_fd, &arm);
+
+	if (arm.ready_to_arm && arm.armed) {
+		warnx("Actuator armed");
+
+	} else {
+		errx(1, "Arming actuators failed");
+	}
+
+	/* subscribe to input rc topic */
+	int input_rc_sub_fd = orb_subscribe(ORB_ID(input_rc));
+	orb_set_interval(input_rc_sub_fd, 200);
 
 	/* one could wait for multiple topics with this technique, just using one here */
 	px4_pollfd_struct_t fds[] = {
 		{ .fd = sensor_sub_fd,   .events = POLLIN },
+		{ .fd = input_rc_sub_fd,   .events = POLLIN },
+		{ .fd = actuator_output_sub_fd,   .events = POLLIN },
 		/* there could be more file descriptors here, in the form like:
 		 * { .fd = other_sub_fd,   .events = POLLIN },
 		 */
@@ -77,9 +117,11 @@ int px4_simple_app_main(int argc, char *argv[])
 
 	int error_counter = 0;
 
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < 50; i++) {
 		/* wait for sensor update of 1 file descriptor for 1000 ms (1 second) */
 		int poll_ret = px4_poll(fds, 1, 1000);
+		poll_ret = px4_poll(fds, 2, 1000);
+		poll_ret = px4_poll(fds, 3, 1000);
 
 		/* handle the poll result */
 		if (poll_ret == 0) {
@@ -102,24 +144,70 @@ int px4_simple_app_main(int argc, char *argv[])
 				struct sensor_combined_s raw;
 				/* copy sensors raw data into local buffer */
 				orb_copy(ORB_ID(sensor_combined), sensor_sub_fd, &raw);
-				PX4_INFO("Accelerometer:\t%8.4f\t%8.4f\t%8.4f",
+				/*PX4_INFO("Accelerometer:\t%8.4f\t%8.4f\t%8.4f, Gyro:\t%8.4f\t%8.4f\t%8.4f",
 					 (double)raw.accelerometer_m_s2[0],
 					 (double)raw.accelerometer_m_s2[1],
-					 (double)raw.accelerometer_m_s2[2]);
+					 (double)raw.accelerometer_m_s2[2],
+					 (double)raw.gyro_rad[0],
+					 (double)raw.gyro_rad[1],
+					 (double)raw.gyro_rad[2]);
 
+				*/
 				/* set att and publish this information for other apps
 				 the following does not have any meaning, it's just an example
 				*/
+				/*
 				att.q[0] = raw.accelerometer_m_s2[0];
 				att.q[1] = raw.accelerometer_m_s2[1];
 				att.q[2] = raw.accelerometer_m_s2[2];
 
-				orb_publish(ORB_ID(vehicle_attitude), att_pub, &att);
+				orb_publish(ORB_ID(vehicle_attitude), att_pub, &att);*/
+			}
+
+			if (fds[1].revents & POLLIN) {
+				
+				struct input_rc_s rc_raw;
+				/* copy sensors raw data into local buffer */
+				orb_copy(ORB_ID(input_rc), input_rc_sub_fd, &rc_raw);		
+				PX4_INFO("RC Input values: %d : \t%8.2f\t%8.2f\t%8.2f\t%8.2f",
+					(int) rc_raw.timestamp_last_signal,
+					(double)rc_raw.values[0],
+					(double)rc_raw.values[1],
+					(double)rc_raw.values[2], //throttle
+					(double)rc_raw.values[3]);
+
+				if ( (double)rc_raw.values[2] < 1490){	
+					for (int l = 0; l != 12; l++) {
+						actuators.control[l] = -0.5f/*((double)rc_raw.values[2]-1080)/410*/;
+					}
+					actuators.timestamp = hrt_absolute_time();
+					orb_publish(ORB_ID(actuator_controls_0), actuator_pub_ptr, &actuators);
+					PX4_INFO("Servo Publisch MIN");
+				} else {
+					for (int l = 0; l != 12; l++) {
+						actuators.control[l] = 0.5f /* - 0.5f*(1900-(double)rc_raw.values[2])/410*/;
+					}
+					actuators.timestamp = hrt_absolute_time();
+					orb_publish(ORB_ID(actuator_controls_0), actuator_pub_ptr, &actuators);
+					PX4_INFO("Servo Publisch MAX");
+				}
 			}
 
 			/* there could be more file descriptors here, in the form like:
 			 * if (fds[1..n].revents & POLLIN) {}
 			 */
+
+			if (fds[2].revents & POLLIN) {
+				struct actuator_outputs_s actuator_out;
+				/* copy sensors raw data into local buffer */
+				orb_copy(ORB_ID(actuator_outputs), actuator_output_sub_fd, &actuator_out);		
+				PX4_INFO("Servo Outputs: \t%8.2f\t%8.2f\t%8.2f\t%8.2f",
+					(double)actuator_out.output[2],
+					(double)actuator_out.output[3],
+					(double)actuator_out.output[4],
+					(double)actuator_out.output[5]);
+			}
+
 		}
 	}
 

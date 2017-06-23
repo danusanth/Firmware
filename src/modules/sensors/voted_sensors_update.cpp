@@ -223,7 +223,6 @@ void VotedSensorsUpdate::parameters_update()
 	/* set offset parameters to new values */
 	bool failed;
 	char str[30];
-	unsigned mag_count = 0;
 	unsigned gyro_count = 0;
 	unsigned accel_count = 0;
 	unsigned gyro_cal_found_count = 0;
@@ -250,11 +249,10 @@ void VotedSensorsUpdate::parameters_update()
 			failed = false;
 
 			(void)sprintf(str, "CAL_GYRO%u_ID", i);
-			int device_id;
+			int32_t device_id;
 			failed = failed || (OK != param_get(param_find(str), &device_id));
 
 			if (failed) {
-				DevMgr::releaseHandle(h);
 				continue;
 			}
 
@@ -306,7 +304,7 @@ void VotedSensorsUpdate::parameters_update()
 		// run through all stored calibrations and reset them
 		for (unsigned i = 0; i < GYRO_COUNT_MAX; i++) {
 
-			int device_id = 0;
+			int32_t device_id = 0;
 			(void)sprintf(str, "CAL_GYRO%u_ID", i);
 			(void)param_set(param_find(str), &device_id);
 		}
@@ -333,11 +331,10 @@ void VotedSensorsUpdate::parameters_update()
 			failed = false;
 
 			(void)sprintf(str, "CAL_ACC%u_ID", i);
-			int device_id;
+			int32_t device_id;
 			failed = failed || (OK != param_get(param_find(str), &device_id));
 
 			if (failed) {
-				DevMgr::releaseHandle(h);
 				continue;
 			}
 
@@ -389,26 +386,53 @@ void VotedSensorsUpdate::parameters_update()
 		// run through all stored calibrations and reset them
 		for (unsigned i = 0; i < ACCEL_COUNT_MAX; i++) {
 
-			int device_id = 0;
+			int32_t device_id = 0;
 			(void)sprintf(str, "CAL_ACC%u_ID", i);
 			(void)param_set(param_find(str), &device_id);
 		}
 	}
 
-	/* run through all mag sensors */
-	for (unsigned driver_index = 0; driver_index < MAG_COUNT_MAX; driver_index++) {
+	/* run through all mag sensors
+	 * Because we store the device id in _mag_device_id, we need to get the id via uorb topic since
+	 * the DevHandle method does not work on POSIX.
+	 */
+	for (unsigned topic_instance = 0; topic_instance < MAG_COUNT_MAX && topic_instance < _mag.subscription_count;
+	     ++topic_instance) {
 
-		(void)sprintf(str, "%s%u", MAG_BASE_DEVICE_PATH, driver_index);
+		struct mag_report report;
 
-		DevHandle h;
-		DevMgr::getHandle(str, h);
-
-		if (!h.isValid()) {
-			/* the driver is not running, abort */
+		if (orb_copy(ORB_ID(sensor_mag), _mag.subscription[topic_instance], &report) != 0) {
 			continue;
 		}
 
-		_mag_device_id[driver_index] = h.ioctl(DEVIOCGDEVICEID, 0);
+		int topic_device_id = report.device_id;
+		bool is_external = (bool)report.is_external;
+		_mag_device_id[topic_instance] = topic_device_id;
+
+		// find the driver handle that matches the topic_device_id
+		DevHandle h;
+
+		for (unsigned driver_index = 0; driver_index < MAG_COUNT_MAX; ++driver_index) {
+
+			(void)sprintf(str, "%s%u", MAG_BASE_DEVICE_PATH, driver_index);
+
+			DevMgr::getHandle(str, h);
+
+			if (!h.isValid()) {
+				/* the driver is not running, continue with the next */
+				continue;
+			}
+
+			int driver_device_id = h.ioctl(DEVIOCGDEVICEID, 0);
+
+			if (driver_device_id == topic_device_id) {
+				break; // we found the matching driver
+
+			} else {
+				DevMgr::releaseHandle(h);
+			}
+		}
+
 		bool config_ok = false;
 
 		/* run through all stored calibrations */
@@ -417,16 +441,15 @@ void VotedSensorsUpdate::parameters_update()
 			failed = false;
 
 			(void)sprintf(str, "CAL_MAG%u_ID", i);
-			int device_id;
+			int32_t device_id;
 			failed = failed || (OK != param_get(param_find(str), &device_id));
 
 			if (failed) {
-				DevMgr::releaseHandle(h);
 				continue;
 			}
 
 			/* if the calibration is for this device, apply it */
-			if (device_id == _mag_device_id[driver_index]) {
+			if (device_id == _mag_device_id[topic_instance]) {
 				struct mag_calibration_s mscale = {};
 				(void)sprintf(str, "CAL_MAG%u_XOFF", i);
 				failed = failed || (OK != param_get(param_find(str), &mscale.x_offset));
@@ -443,18 +466,7 @@ void VotedSensorsUpdate::parameters_update()
 
 				(void)sprintf(str, "CAL_MAG%u_ROT", i);
 
-				if (h.ioctl(MAGIOCGEXTERNAL, 0) <= 0) {
-					/* mag is internal - reset param to -1 to indicate internal mag */
-					int32_t minus_one;
-					param_get(param_find(str), &minus_one);
-
-					if (minus_one != MAG_ROT_VAL_INTERNAL) {
-						minus_one = MAG_ROT_VAL_INTERNAL;
-						param_set_no_notification(param_find(str), &minus_one);
-					}
-
-				} else {
-					/* mag is external */
+				if (is_external) {
 					int32_t mag_rot;
 					param_get(param_find(str), &mag_rot);
 
@@ -463,6 +475,16 @@ void VotedSensorsUpdate::parameters_update()
 						/* it was marked as internal, change to external with no rotation */
 						mag_rot = 0;
 						param_set_no_notification(param_find(str), &mag_rot);
+					}
+
+				} else {
+					/* mag is internal - reset param to -1 to indicate internal mag */
+					int32_t minus_one;
+					param_get(param_find(str), &minus_one);
+
+					if (minus_one != MAG_ROT_VAL_INTERNAL) {
+						minus_one = MAG_ROT_VAL_INTERNAL;
+						param_set_no_notification(param_find(str), &minus_one);
 					}
 				}
 
@@ -481,10 +503,6 @@ void VotedSensorsUpdate::parameters_update()
 
 				break;
 			}
-		}
-
-		if (config_ok) {
-			mag_count++;
 		}
 	}
 
@@ -722,6 +740,11 @@ void VotedSensorsUpdate::mag_poll(struct sensor_combined_s &raw)
 
 			// First publication with data
 			if (_mag.priority[uorb_index] == 0) {
+
+				// Parameters update to get offsets and scaling loaded (if not already loaded)
+				parameters_update();
+
+				// Set device priority for the voter
 				int32_t priority = 0;
 				orb_priority(_mag.subscription[uorb_index], &priority);
 				_mag.priority[uorb_index] = (uint8_t)priority;
@@ -1020,13 +1043,17 @@ VotedSensorsUpdate::apply_accel_calibration(DevHandle &h, const struct accel_cal
 bool
 VotedSensorsUpdate::apply_mag_calibration(DevHandle &h, const struct mag_calibration_s *mcal, const int device_id)
 {
-#if !defined(__PX4_QURT) && !defined(__PX4_POSIX_RPI) && !defined(__PX4_POSIX_BEBOP)
+#if !defined(__PX4_QURT) && !defined(__PX4_POSIX)
+
+	if (!h.isValid()) {
+		return false;
+	}
 
 	/* On most systems, we can just use the IOCTL call to set the calibration params. */
 	return !h.ioctl(MAGIOCSSCALE, (long unsigned int)mcal);
 
 #else
-	/* On QURT, the params are read directly in the respective wrappers. */
+	/* On QURT & POSIX, the params are read directly in the respective wrappers. */
 	return true;
 #endif
 }

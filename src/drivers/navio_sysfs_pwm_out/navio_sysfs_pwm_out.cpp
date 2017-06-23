@@ -57,11 +57,13 @@ static px4_task_t _task_handle = -1;
 volatile bool _task_should_exit = false;
 static bool _is_running = false;
 
-static const int NUM_PWM = 4;
+static const int NUM_PWM = 14;  //total available pins on navio
 static char _device[64] = "/sys/class/pwm/pwmchip0";
 static int  _pwm_fd[NUM_PWM];
+static const int NUM_MAIN_PINS = 1; //main pins : for motors ; aux pins for servos
 
-static const int FREQUENCY_PWM = 400;
+static const int FREQUENCY_PWM = 400; //esc frequency, digital servos works also fine, but how long
+static const int FREQUENCY_PWM_AUX = 400; //
 static char _mixer_filename[64] = "ROMFS/px4fmu_common/mixers/quad_x.main.mix";
 
 // subscriptions
@@ -92,6 +94,11 @@ pwm_limit_t     _pwm_limit;
 int32_t _pwm_disarmed;
 int32_t _pwm_min;
 int32_t _pwm_max;
+
+// servo parameters
+int32_t _pwm_aux_disarmed;
+int32_t _pwm_aux_min;
+int32_t _pwm_aux_max;
 
 MixerGroup *_mixer_group = nullptr;
 
@@ -205,13 +212,24 @@ int pwm_initialize(const char *device)
 		}
 	}
 
-	for (i = 0; i < NUM_PWM; ++i) {
+        // for main output and auxillary outputs
+        // ------------------------------------------------------------------
+        for (i = 0; i < NUM_MAIN_PINS; ++i) {
+                ::snprintf(path, sizeof(path), "%s/pwm%u/period", device, i);
+
+                if (pwm_write_sysfs(path, (int)1e9 / FREQUENCY_PWM)) {
+                        PX4_ERR("PWM period failed");
+                }
+        }
+
+        for (i = NUM_MAIN_PINS; i < NUM_PWM; ++i) {
 		::snprintf(path, sizeof(path), "%s/pwm%u/period", device, i);
 
-		if (pwm_write_sysfs(path, (int)1e9 / FREQUENCY_PWM)) {
+                if (pwm_write_sysfs(path, (int)1e9 / FREQUENCY_PWM_AUX)) {
 			PX4_ERR("PWM period failed");
 		}
 	}
+        // ------------------------------------------------------------------
 
 	for (i = 0; i < NUM_PWM; ++i) {
 		::snprintf(path, sizeof(path), "%s/pwm%u/duty_cycle", device, i);
@@ -349,17 +367,25 @@ void task_main(int argc, char *argv[])
 			}
 
 			const uint16_t reverse_mask = 0;
-			uint16_t disarmed_pwm[4];
-			uint16_t min_pwm[4];
-			uint16_t max_pwm[4];
+                        uint16_t disarmed_pwm[14];
+                        uint16_t min_pwm[14];
+                        uint16_t max_pwm[14];
 
-			for (unsigned int i = 0; i < 4; i++) {
-				disarmed_pwm[i] = _pwm_disarmed;
-				min_pwm[i] = _pwm_min;
-				max_pwm[i] = _pwm_max;
+                        /* First pin is for the esc mixing */
+                        for (unsigned int i = 0; i < NUM_MAIN_PINS; i++) {
+                                disarmed_pwm[i] = _pwm_disarmed;
+                                min_pwm[i] = _pwm_min;
+                                max_pwm[i] = _pwm_max;
+                        }
+
+                        /* Other pins is for the servo mixing */
+                        for (unsigned int i = NUM_MAIN_PINS; i < NUM_PWM; i++) {
+                                disarmed_pwm[i] = _pwm_aux_disarmed;
+                                min_pwm[i] = _pwm_aux_min;
+                                max_pwm[i] = _pwm_aux_max;
 			}
 
-			uint16_t pwm[4];
+                        uint16_t pwm[14];
 
 			// TODO FIXME: pre-armed seems broken
 			pwm_limit_calc(_armed.armed,
@@ -499,6 +525,14 @@ int navio_sysfs_pwm_out_main(int argc, char *argv[])
 	param_get(param_find("PWM_DISARMED"), &navio_sysfs_pwm_out::_pwm_disarmed);
 	param_get(param_find("PWM_MIN"), &navio_sysfs_pwm_out::_pwm_min);
 	param_get(param_find("PWM_MAX"), &navio_sysfs_pwm_out::_pwm_max);
+    PX4_WARN("Parameters used for ESC: PWM_DISARMED:%d, PWM_MIN: %d, PWM_MAX: %d", navio_sysfs_pwm_out::_pwm_disarmed,  navio_sysfs_pwm_out::_pwm_min,  navio_sysfs_pwm_out::_pwm_max);
+
+    // get the parameters for the servo's pwm. Even if everything is in one mixer file. Be consistent with pixhawk
+    param_get(param_find("PWM_AUX_DISARMED"), &navio_sysfs_pwm_out::_pwm_aux_disarmed);
+    param_get(param_find("PWM_AUX_MIN"), &navio_sysfs_pwm_out::_pwm_aux_min);
+    param_get(param_find("PWM_AUX_MAX"), &navio_sysfs_pwm_out::_pwm_aux_max);
+    PX4_WARN("Parameters used for SERVO: PWM_AUX_DISARMED:%d, PWM_AUX_MIN: %d, PWM_AUX_MAX: %d", navio_sysfs_pwm_out::_pwm_aux_disarmed,  navio_sysfs_pwm_out::_pwm_aux_min,  navio_sysfs_pwm_out::_pwm_aux_max);
+
 
 	/*
 	 * Start/load the driver.
