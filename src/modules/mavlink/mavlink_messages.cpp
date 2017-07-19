@@ -4126,6 +4126,7 @@ protected:
             _msg_servo_outputs.angle_servo2 = _servo_outputs.output[3]*20;
             _msg_servo_outputs.angle_servo3 =_servo_outputs.output[4]*-20;
             _msg_servo_outputs.angle_servo4 = _servo_outputs.output[5]*20;
+            _msg_servo_outputs.motor_rpm = _servo_outputs.output[0];
 
             mavlink_msg_variable_pitch_angle_send_struct(_mavlink->get_channel(), &_msg_servo_outputs);
         }

@@ -119,6 +119,7 @@ MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
 	_distance_sensor_pub(nullptr),
 	_offboard_control_mode_pub(nullptr),
 	_actuator_controls_pub(nullptr),
+        _actuator_outputs_pub(nullptr),
 	_global_vel_sp_pub(nullptr),
 	_att_sp_pub(nullptr),
 	_rates_sp_pub(nullptr),
@@ -155,7 +156,7 @@ MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
 	_mom_switch_state(0),
 	_p_bat_emergen_thr(param_find("BAT_EMERGEN_THR")),
 	_p_bat_crit_thr(param_find("BAT_CRIT_THR")),
-	_p_bat_low_thr(param_find("BAT_LOW_THR"))
+        _p_bat_low_thr(param_find("BAT_LOW_THR"))
 {
 }
 
@@ -301,6 +302,9 @@ MavlinkReceiver::handle_message(mavlink_message_t *msg)
 	case MAVLINK_MSG_ID_PLAY_TUNE:
 		handle_message_play_tune(msg);
 		break;
+        case MAVLINK_MSG_ID_SET_VARIABLE_PITCH_ANGLE:
+                handle_message_set_variable_pitch_angle(msg);
+                break;
 
 	default:
 		break;
@@ -2551,4 +2555,71 @@ MavlinkReceiver::receive_start(pthread_t *thread, Mavlink *parent)
 	pthread_create(thread, &receiveloop_attr, MavlinkReceiver::start_helper, (void *)parent);
 
 	pthread_attr_destroy(&receiveloop_attr);
+}
+
+void
+MavlinkReceiver::handle_message_set_variable_pitch_angle(mavlink_message_t *msg)
+{
+    mavlink_set_variable_pitch_angle_t set_varpitchangle;
+    mavlink_msg_set_variable_pitch_angle_decode(msg, &set_varpitchangle);
+    
+    
+//    struct offboard_control_mode_s offboard_control_mode = {};
+
+    struct actuator_outputs_s actuator_outputs = {};
+
+    bool values_finite =
+            PX4_ISFINITE(set_varpitchangle.angle_servo1) &&
+            PX4_ISFINITE(set_varpitchangle.angle_servo2) &&
+            PX4_ISFINITE(set_varpitchangle.angle_servo3) &&
+            PX4_ISFINITE(set_varpitchangle.angle_servo4) &&
+            PX4_ISFINITE(set_varpitchangle.motor_rpm);
+
+    if (values_finite) {
+
+//            /* ignore all since we are setting raw actuators here */
+//            offboard_control_mode.ignore_thrust             = true;
+//            offboard_control_mode.ignore_attitude           = true;
+//            offboard_control_mode.ignore_bodyrate           = true;
+//            offboard_control_mode.ignore_position           = true;
+//            offboard_control_mode.ignore_velocity           = true;
+//            offboard_control_mode.ignore_acceleration_force = true;
+
+//            offboard_control_mode.timestamp = hrt_absolute_time();
+
+//            if (_offboard_control_mode_pub == nullptr) {
+//                    _offboard_control_mode_pub = orb_advertise(ORB_ID(offboard_control_mode), &offboard_control_mode);
+
+//            } else {
+//                    orb_publish(ORB_ID(offboard_control_mode), _offboard_control_mode_pub, &offboard_control_mode);
+//            }
+
+
+            /* If we are in offboard control mode, publish the actuator controls */
+//            bool updated;
+//            orb_check(_control_mode_sub, &updated);
+
+//            if (updated) {
+//                    orb_copy(ORB_ID(vehicle_control_mode), _control_mode_sub, &_control_mode);
+//            }
+
+//            if (_control_mode.flag_control_offboard_enabled) {
+
+                    actuator_outputs.timestamp = hrt_absolute_time();
+
+                    /* Set duty cycles for the variable pitch servos in actuator_controls_0 */
+                    actuator_outputs.output[0] = set_varpitchangle.motor_rpm;
+                    actuator_outputs.output[2] = (set_varpitchangle.angle_servo1*180/3.1415f)/20;
+                    actuator_outputs.output[3] = (set_varpitchangle.angle_servo2*180/3.1415f)/20;
+                    actuator_outputs.output[4] = (set_varpitchangle.angle_servo3*180/3.1415f)/20;
+                    actuator_outputs.output[5] = (set_varpitchangle.angle_servo4*180/3.1415f)/20;
+
+                    if (_actuator_outputs_pub == nullptr) {
+                            _actuator_outputs_pub = orb_advertise(ORB_ID(actuator_outputs), &actuator_outputs);
+
+                    } else {
+                            orb_publish(ORB_ID(actuator_outputs), _actuator_outputs_pub, &actuator_outputs);
+                   }
+//            }
+    }
 }

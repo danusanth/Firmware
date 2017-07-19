@@ -78,6 +78,7 @@
 #include <uORB/topics/gps_inject_data.h>
 #include <uORB/topics/control_state.h>
 #include <uORB/topics/collision_report.h>
+#include <v1.0/common/mavlink_msg_set_variable_pitch_angle.h>
 
 
 #include "mavlink_mission.h"
@@ -151,6 +152,7 @@ private:
 	void handle_message_serial_control(mavlink_message_t *msg);
 	void handle_message_logging_ack(mavlink_message_t *msg);
 	void handle_message_play_tune(mavlink_message_t *msg);
+	void handle_message_set_variable_pitch_angle(mavlink_message_t *msg);
 
 	void *receive_thread(void *arg);
 
@@ -219,6 +221,7 @@ private:
 	orb_advert_t _distance_sensor_pub;
 	orb_advert_t _offboard_control_mode_pub;
 	orb_advert_t _actuator_controls_pub;
+	orb_advert_t _actuator_outputs_pub;
 	orb_advert_t _global_vel_sp_pub;
 	orb_advert_t _att_sp_pub;
 	orb_advert_t _rates_sp_pub;
