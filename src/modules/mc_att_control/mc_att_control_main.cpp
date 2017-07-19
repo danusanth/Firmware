@@ -145,11 +145,11 @@ private:
 	int _selected_gyro;
 
 	orb_advert_t	_v_rates_sp_pub;		/**< rate setpoint publication */
-	orb_advert_t	_actuators_0_pub;		/**< attitude actuator controls publication */
+        orb_advert_t	_actuators_0_pub;		/**< attitude actuator controls publication */
 	orb_advert_t	_controller_status_pub;	/**< controller status publication */
 
 	orb_id_t _rates_sp_id;	/**< pointer to correct rates setpoint uORB metadata structure */
-	orb_id_t _actuators_id;	/**< pointer to correct actuator controls0 uORB metadata structure */
+        orb_id_t _actuators_id;	/**< pointer to correct actuator controls0 uORB metadata structure */
 
 	bool		_actuators_0_circuit_breaker_enabled;	/**< circuit breaker to suppress output */
 
@@ -158,7 +158,7 @@ private:
 	struct vehicle_rates_setpoint_s		_v_rates_sp;		/**< vehicle rates setpoint */
 	struct manual_control_setpoint_s	_manual_control_sp;	/**< manual control setpoint */
 	struct vehicle_control_mode_s		_v_control_mode;	/**< vehicle control mode */
-	struct actuator_controls_s			_actuators;			/**< actuator controls */
+        struct actuator_controls_s			_actuators;			/**< actuator controls */
 	struct actuator_armed_s				_armed;				/**< actuator arming status */
 	struct vehicle_status_s				_vehicle_status;	/**< vehicle status */
 	struct multirotor_motor_limits_s	_motor_limits;		/**< motor limits */
@@ -400,10 +400,10 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 
 	/* publications */
 	_v_rates_sp_pub(nullptr),
-	_actuators_0_pub(nullptr),
+        _actuators_0_pub(nullptr),
 	_controller_status_pub(nullptr),
 	_rates_sp_id(nullptr),
-	_actuators_id(nullptr),
+        _actuators_id(nullptr),
 
 	_actuators_0_circuit_breaker_enabled(false),
 
@@ -412,7 +412,7 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	_v_rates_sp{},
 	_manual_control_sp{},
 	_v_control_mode{},
-	_actuators{},
+        _actuators{},
 	_armed{},
 	_vehicle_status{},
 	_motor_limits{},
@@ -1254,8 +1254,12 @@ MulticopterAttitudeControl::task_main()
 				_actuators.control[2] = (PX4_ISFINITE(_att_control(2))) ? _att_control(2) : 0.0f;
 				_actuators.control[3] = (PX4_ISFINITE(_thrust_sp)) ? _thrust_sp : 0.0f;
 				_actuators.control[7] = _v_att_sp.landing_gear;
+                                 /* publish motor rpm controls, range -1.0f to 1.0f  */
+                                _actuators.control[8] = _manual_control_sp.aux1;
 				_actuators.timestamp = hrt_absolute_time();
 				_actuators.timestamp_sample = _ctrl_state.timestamp;
+
+
 
 				/* scale effort by battery status */
 				if (_params.bat_scale_en && _battery_status.scale > 0.0f) {
@@ -1304,8 +1308,11 @@ MulticopterAttitudeControl::task_main()
 					_actuators.control[1] = 0.0f;
 					_actuators.control[2] = 0.0f;
 					_actuators.control[3] = 0.0f;
+                                        /* publish motor rpm controls, in this case 0  */
+                                        _actuators.control[8] = -1.0f;
 					_actuators.timestamp = hrt_absolute_time();
 					_actuators.timestamp_sample = _ctrl_state.timestamp;
+
 
 					if (!_actuators_0_circuit_breaker_enabled) {
 						if (_actuators_0_pub != nullptr) {
@@ -1316,6 +1323,7 @@ MulticopterAttitudeControl::task_main()
 						} else if (_actuators_id) {
 							_actuators_0_pub = orb_advertise(_actuators_id, &_actuators);
 						}
+
 					}
 
 					_controller_status.roll_rate_integ = _rates_int(0);
