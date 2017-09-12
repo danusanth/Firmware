@@ -53,8 +53,6 @@
 #include <px4_time.h>
 #include <systemlib/err.h>
 #include <systemlib/mavlink_log.h>
-#include <v1.0/common/mavlink_msg_variable_pitch_angle.h>
-
 
 #include <uORB/topics/actuator_armed.h>
 #include <uORB/topics/actuator_controls.h>

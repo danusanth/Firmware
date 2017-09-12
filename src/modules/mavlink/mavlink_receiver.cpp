@@ -118,8 +118,7 @@ MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
 	_flow_distance_sensor_pub(nullptr),
 	_distance_sensor_pub(nullptr),
 	_offboard_control_mode_pub(nullptr),
-	_actuator_controls_pub(nullptr),
-        _actuator_outputs_pub(nullptr),
+        _actuator_controls_pub(nullptr),
 	_global_vel_sp_pub(nullptr),
 	_att_sp_pub(nullptr),
 	_rates_sp_pub(nullptr),
@@ -129,7 +128,7 @@ MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
 	_vision_position_pub(nullptr),
 	_vision_attitude_pub(nullptr),
 	_telemetry_status_pub(nullptr),
-	_rc_pub(nullptr),
+        _rc_pub(nullptr),
 	_manual_pub(nullptr),
 	_land_detector_pub(nullptr),
 	_time_offset_pub(nullptr),
@@ -137,8 +136,9 @@ MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
 	_transponder_report_pub(nullptr),
 	_collision_report_pub(nullptr),
 	_control_state_pub(nullptr),
+        _r_force_pub(nullptr),
 	_gps_inject_data_pub(nullptr),
-	_command_ack_pub(nullptr),
+        _command_ack_pub(nullptr),
 	_control_mode_sub(orb_subscribe(ORB_ID(vehicle_control_mode))),
 	_global_ref_timestamp(0),
 	_hil_frames(0),
@@ -201,7 +201,6 @@ MavlinkReceiver::handle_message(mavlink_message_t *msg)
 		if (_mavlink->accepting_commands()) {
 			handle_message_set_mode(msg);
 		}
-
 		break;
 
 	case MAVLINK_MSG_ID_ATT_POS_MOCAP:
@@ -216,7 +215,7 @@ MavlinkReceiver::handle_message(mavlink_message_t *msg)
 		handle_message_set_attitude_target(msg);
 		break;
 
-	case MAVLINK_MSG_ID_SET_ACTUATOR_CONTROL_TARGET:
+        case MAVLINK_MSG_ID_SET_ACTUATOR_CONTROL_TARGET:
 		handle_message_set_actuator_control_target(msg);
 		break;
 
@@ -302,8 +301,13 @@ MavlinkReceiver::handle_message(mavlink_message_t *msg)
 	case MAVLINK_MSG_ID_PLAY_TUNE:
 		handle_message_play_tune(msg);
 		break;
+
         case MAVLINK_MSG_ID_SET_VARIABLE_PITCH_ANGLE:
                 handle_message_set_variable_pitch_angle(msg);
+                break;
+
+        case MAVLINK_MSG_ID_SET_ROTOR_FORCE_TARGET:
+                handle_message_rotor_force_msg(msg);
                 break;
 
 	default:
@@ -1014,7 +1018,7 @@ MavlinkReceiver::handle_message_set_actuator_control_target(mavlink_message_t *m
 
 	struct offboard_control_mode_s offboard_control_mode = {};
 
-	struct actuator_controls_s actuator_controls = {};
+        struct actuator_controls_s actuator_controls = {};
 
 	bool values_finite =
 		PX4_ISFINITE(set_actuator_control_target.controls[0]) &&
@@ -1060,19 +1064,32 @@ MavlinkReceiver::handle_message_set_actuator_control_target(mavlink_message_t *m
 
 		if (_control_mode.flag_control_offboard_enabled) {
 
-			actuator_controls.timestamp = hrt_absolute_time();
+                        actuator_controls.timestamp = hrt_absolute_time();
 
-			/* Set duty cycles for the servos in actuator_controls_0 */
-			for (size_t i = 0; i < 8; i++) {
-				actuator_controls.control[i] = set_actuator_control_target.controls[i];
-			}
+//			/* Set duty cycles for the servos in actuator_controls_0 */
+//                        for (size_t i = 0; i < 7; i++) {
+//				actuator_controls.control[i] = set_actuator_control_target.controls[i];
+//			}
+                        /*Workaround for publishing each angle*/
+                        actuator_controls.control[8] = set_actuator_control_target.controls[4];
+                        actuator_controls.control[9] = -1*(set_actuator_control_target.controls[0]+20)/20;
+                        actuator_controls.control[10] =(set_actuator_control_target.controls[1]+20)/20;
+                        actuator_controls.control[11] =-1*(set_actuator_control_target.controls[2]+20)/20;
+                        actuator_controls.control[12] =(set_actuator_control_target.controls[3]+20)/20;
 
-			if (_actuator_controls_pub == nullptr) {
-				_actuator_controls_pub = orb_advertise(ORB_ID(actuator_controls_0), &actuator_controls);
+//                        PX4_INFO("Output values: \t%8.2f\t%8.2f\t%8.2f\t%8.2f\t%8.2f"
+//                                                                (double)actuator_controls.control[9],
+//                                                                (double)actuator_controls.control[10],
+//                                                                (double)actuator_controls.control[11],
+//                                                                (double)actuator_controls.control[12],
+//                                                                (double)actuator_controls.control[8]);
 
-			} else {
-				orb_publish(ORB_ID(actuator_controls_0), _actuator_controls_pub, &actuator_controls);
-			}
+                        if (_actuator_controls_pub == nullptr) {
+                                _actuator_controls_pub = orb_advertise(ORB_ID(actuator_controls_0), &actuator_controls);
+
+                        } else {
+                                orb_publish(ORB_ID(actuator_controls_0), _actuator_controls_pub, &actuator_controls);
+                        }
 		}
 	}
 
@@ -2562,64 +2579,87 @@ MavlinkReceiver::handle_message_set_variable_pitch_angle(mavlink_message_t *msg)
 {
     mavlink_set_variable_pitch_angle_t set_varpitchangle;
     mavlink_msg_set_variable_pitch_angle_decode(msg, &set_varpitchangle);
+
+    PX4_INFO("RC Input values: %d : \t%8.2f\t%8.2f\t%8.2f\t%8.2f",
+                                            1,
+                                            (double)set_varpitchangle.angle_servo1,
+                                            (double)set_varpitchangle.angle_servo2,
+                                            (double)set_varpitchangle.angle_servo3,
+                                            (double)set_varpitchangle.angle_servo4);
     
-    
-//    struct offboard_control_mode_s offboard_control_mode = {};
+    struct offboard_control_mode_s offboard_control_mode = {};
+    struct actuator_controls_s actuator_controls = {};
 
-    struct actuator_outputs_s actuator_outputs = {};
+    if ((mavlink_system.sysid == set_varpitchangle.target_system ||
+         set_varpitchangle.target_system == 0) &&
+        (mavlink_system.compid == set_varpitchangle.target_component ||
+         set_varpitchangle.target_component == 0)) {
 
-    bool values_finite =
-            PX4_ISFINITE(set_varpitchangle.angle_servo1) &&
-            PX4_ISFINITE(set_varpitchangle.angle_servo2) &&
-            PX4_ISFINITE(set_varpitchangle.angle_servo3) &&
-            PX4_ISFINITE(set_varpitchangle.angle_servo4) &&
-            PX4_ISFINITE(set_varpitchangle.motor_rpm);
+            /* ignore all since we are setting raw actuators here */
+            offboard_control_mode.ignore_thrust             = true;
+            offboard_control_mode.ignore_attitude           = true;
+            offboard_control_mode.ignore_bodyrate           = true;
+            offboard_control_mode.ignore_position           = true;
+            offboard_control_mode.ignore_velocity           = true;
+            offboard_control_mode.ignore_acceleration_force = true;
 
-    if (values_finite) {
+            offboard_control_mode.timestamp = hrt_absolute_time();
 
-//            /* ignore all since we are setting raw actuators here */
-//            offboard_control_mode.ignore_thrust             = true;
-//            offboard_control_mode.ignore_attitude           = true;
-//            offboard_control_mode.ignore_bodyrate           = true;
-//            offboard_control_mode.ignore_position           = true;
-//            offboard_control_mode.ignore_velocity           = true;
-//            offboard_control_mode.ignore_acceleration_force = true;
+            if (_offboard_control_mode_pub == nullptr) {
+                    _offboard_control_mode_pub = orb_advertise(ORB_ID(offboard_control_mode), &offboard_control_mode);
 
-//            offboard_control_mode.timestamp = hrt_absolute_time();
-
-//            if (_offboard_control_mode_pub == nullptr) {
-//                    _offboard_control_mode_pub = orb_advertise(ORB_ID(offboard_control_mode), &offboard_control_mode);
-
-//            } else {
-//                    orb_publish(ORB_ID(offboard_control_mode), _offboard_control_mode_pub, &offboard_control_mode);
-//            }
+            } else {
+                    orb_publish(ORB_ID(offboard_control_mode), _offboard_control_mode_pub, &offboard_control_mode);
+            }
 
 
             /* If we are in offboard control mode, publish the actuator controls */
-//            bool updated;
-//            orb_check(_control_mode_sub, &updated);
+            bool updated;
+            orb_check(_control_mode_sub, &updated);
 
-//            if (updated) {
-//                    orb_copy(ORB_ID(vehicle_control_mode), _control_mode_sub, &_control_mode);
-//            }
+            if (updated) {
+                    orb_copy(ORB_ID(vehicle_control_mode), _control_mode_sub, &_control_mode);
+            }
 
-//            if (_control_mode.flag_control_offboard_enabled) {
+            if (_control_mode.flag_control_offboard_enabled) {
 
-                    actuator_outputs.timestamp = hrt_absolute_time();
+                    actuator_controls.timestamp = hrt_absolute_time();
 
-                    /* Set duty cycles for the variable pitch servos in actuator_controls_0 */
-                    actuator_outputs.output[0] = set_varpitchangle.motor_rpm;
-                    actuator_outputs.output[2] = (set_varpitchangle.angle_servo1*180/3.1415f)/20;
-                    actuator_outputs.output[3] = (set_varpitchangle.angle_servo2*180/3.1415f)/20;
-                    actuator_outputs.output[4] = (set_varpitchangle.angle_servo3*180/3.1415f)/20;
-                    actuator_outputs.output[5] = (set_varpitchangle.angle_servo4*180/3.1415f)/20;
+                    /* Set duty cycles for the servos in actuator_controls_0 */
+                    for (size_t i = 0; i < 7; i++) {
+                            actuator_controls.control[i] = 0;
+                    }
 
-                    if (_actuator_outputs_pub == nullptr) {
-                            _actuator_outputs_pub = orb_advertise(ORB_ID(actuator_outputs), &actuator_outputs);
+                    actuator_controls.control[8] = set_varpitchangle.motor_rpm;
+
+
+                    if (_actuator_controls_pub == nullptr) {
+                            _actuator_controls_pub = orb_advertise(ORB_ID(actuator_controls_0), &actuator_controls);
 
                     } else {
-                            orb_publish(ORB_ID(actuator_outputs), _actuator_outputs_pub, &actuator_outputs);
-                   }
-//            }
+                            orb_publish(ORB_ID(actuator_controls_0), _actuator_controls_pub, &actuator_controls);
+                    }
+            }
     }
 }
+
+void
+MavlinkReceiver::handle_message_rotor_force_msg(mavlink_message_t *msg)
+{
+    mavlink_set_rotor_force_target_t forces;
+    mavlink_msg_set_rotor_force_target_decode(msg, &forces);
+
+    struct rotor_force_s f = {};
+
+    f.timestamp = hrt_absolute_time();
+    for(int i=0;i<4;i++)
+        f.force[i] = forces.force[i];
+
+    if (_r_force_pub == nullptr) {
+        _r_force_pub = orb_advertise(ORB_ID(rotor_force), &f);
+
+    } else {
+        orb_publish(ORB_ID(rotor_force),  _r_force_pub, &f);
+    }
+}
+
