@@ -52,6 +52,7 @@ set(config_module_list
 	modules/fw_att_control
 	modules/fw_pos_control_l1
 	modules/vtol_att_control
+	modules/mc_force_control
 
 	#
 	# Library modules
