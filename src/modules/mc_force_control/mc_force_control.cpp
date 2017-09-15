@@ -1,6 +1,7 @@
 /**
  * @file mc_force_control.c
  * Offboard controller for the variable pitch multicopter 
+ * Takes Force input values (4) and calculate rotor pitch angles and motor command.
  *
  * @author Danusanth Sri <srikantd@student.ethz.ch>
  */
@@ -17,6 +18,7 @@
 
 #include <uORB/uORB.h>
 #include <uORB/topics/rotor_force.h>
+#include <uORB/topics/actuator_controls.h>
 
 extern "C" __EXPORT int mc_force_control_main(int argc, char *argv[]);
 
@@ -46,10 +48,14 @@ private:
 
     int		_force_sub;                     /**< rotor force subscription */
 
-    struct rotor_force_s		_rotor_forces;		/**< incoming rotor force */
+    orb_advert_t	_actuator_controls_pub;		/**< attitude actuator controls publication */
 
-    const double  _lift_const = 5.9467E-07;      /**< rotor lift const based on system idef. of the quad */
+    struct rotor_force_s		_rotor_forces;		/**< incoming rotor force */
+    struct actuator_controls_s          _actuator_controls;     /**< actuator controls*/
+
+    const double  _lift_const = 5.9467E-07;             /**< rotor lift const based on system idef. of the quad */
     const double  _alpha_bound = 0.349065850000000;     /**< max/min rotor pitch angle of the quad */
+    const float   _radtodeg = 57.2957795;               /**< for conversion*/
 
     /**
      * Check for changes in rotor force inputs.
@@ -98,7 +104,14 @@ MulticopterForceControl::MulticopterForceControl() :
 
     /* subscriptions */
     _force_sub(-1),
-    _rotor_forces{}
+
+    /* publications */
+    _actuator_controls_pub(nullptr),
+
+    /* msg */
+    _rotor_forces{},
+    _actuator_controls{}
+
 {
 
 }
@@ -191,6 +204,8 @@ MulticopterForceControl::task_main()
     px4_pollfd_struct_t poll_fds = {};
     poll_fds.events = POLLIN;
 
+    int err_count = 0;
+
     while (!_task_should_exit) {
         poll_fds.fd = _force_sub;
 
@@ -199,11 +214,16 @@ MulticopterForceControl::task_main()
 
         /* timed out - periodic check for _task_should_exit */
         if (pret == 0) {
+                err_count++;
+                if(err_count%100 == 0){
+                    warn("poll error: Time out. Offboard active? Otherwise stop module with 'mc_force_control stop' Error: #%d", err_count);
+                }
                 continue;
         }
 
         /* this is undesirable but not much we can do - might want to flag unhappy status */
         if (pret < 0) {
+                err_count++;
                 warn("mc force ctrl: poll error %d, %d", pret, errno);
                 /* sleep a bit before next try */
                 usleep(100000);
@@ -223,17 +243,21 @@ MulticopterForceControl::task_main()
             double command = motorspeed_command(rotor_pitch_angles,4,rpm);
 
             //publish actuator_controls command
+            _actuator_controls.timestamp = _rotor_forces.timestamp;
+            //motorspeed rpm command [-1,1]
+            _actuator_controls.control[8] = (float)command;
+            //direct mapping to mixer through extra control ports. CCW/CW*(rotor_angle(deg) + 20)/20
+            _actuator_controls.control[9] = -1*((float)rotor_pitch_angles[0]*_radtodeg+20)/20;
+            _actuator_controls.control[10] =((float)rotor_pitch_angles[1]*_radtodeg+20)/20;
+            _actuator_controls.control[11] =-1*((float)rotor_pitch_angles[2]*_radtodeg+20)/20;
+            _actuator_controls.control[12] =((float)rotor_pitch_angles[3]*_radtodeg+20)/20;
 
+            if (_actuator_controls_pub == nullptr) {
+                    _actuator_controls_pub = orb_advertise(ORB_ID(actuator_controls_0), &_actuator_controls);
 
-            //for debugging
-            PX4_INFO("Rotor angles:\t%8.4f\t%8.4f\t%8.4f\t%8.4f average speed: \t%8.4f command: \t%8.4f",
-                    rotor_pitch_angles[0],
-                    rotor_pitch_angles[1],
-                    rotor_pitch_angles[2],
-                    rotor_pitch_angles[3],
-                    rpm,
-                    command
-                    );
+            } else {
+                    orb_publish(ORB_ID(actuator_controls_0), _actuator_controls_pub, &_actuator_controls);
+            }
         }
 
 

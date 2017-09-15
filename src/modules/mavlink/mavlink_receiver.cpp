@@ -2580,12 +2580,12 @@ MavlinkReceiver::handle_message_set_variable_pitch_angle(mavlink_message_t *msg)
     mavlink_set_variable_pitch_angle_t set_varpitchangle;
     mavlink_msg_set_variable_pitch_angle_decode(msg, &set_varpitchangle);
 
-    PX4_INFO("RC Input values: %d : \t%8.2f\t%8.2f\t%8.2f\t%8.2f",
-                                            1,
-                                            (double)set_varpitchangle.angle_servo1,
-                                            (double)set_varpitchangle.angle_servo2,
-                                            (double)set_varpitchangle.angle_servo3,
-                                            (double)set_varpitchangle.angle_servo4);
+    bool values_finite =
+            PX4_ISFINITE(set_varpitchangle.angle_servo1) &&
+            PX4_ISFINITE(set_varpitchangle.angle_servo2) &&
+            PX4_ISFINITE(set_varpitchangle.angle_servo3) &&
+            PX4_ISFINITE(set_varpitchangle.angle_servo4) &&
+            PX4_ISFINITE(set_varpitchangle.motor_rpm);
     
     struct offboard_control_mode_s offboard_control_mode = {};
     struct actuator_controls_s actuator_controls = {};
@@ -2593,7 +2593,7 @@ MavlinkReceiver::handle_message_set_variable_pitch_angle(mavlink_message_t *msg)
     if ((mavlink_system.sysid == set_varpitchangle.target_system ||
          set_varpitchangle.target_system == 0) &&
         (mavlink_system.compid == set_varpitchangle.target_component ||
-         set_varpitchangle.target_component == 0)) {
+         set_varpitchangle.target_component == 0) && values_finite) {
 
             /* ignore all since we are setting raw actuators here */
             offboard_control_mode.ignore_thrust             = true;
@@ -2626,9 +2626,10 @@ MavlinkReceiver::handle_message_set_variable_pitch_angle(mavlink_message_t *msg)
                     actuator_controls.timestamp = hrt_absolute_time();
 
                     /* Set duty cycles for the servos in actuator_controls_0 */
-                    for (size_t i = 0; i < 7; i++) {
-                            actuator_controls.control[i] = 0;
-                    }
+                    actuator_controls.control[9] = -1*(set_varpitchangle.angle_servo1+20)/20;
+                    actuator_controls.control[10] =(set_varpitchangle.angle_servo2+20)/20;
+                    actuator_controls.control[11] =-1*(set_varpitchangle.angle_servo3+20)/20;
+                    actuator_controls.control[12] =(set_varpitchangle.angle_servo4+20)/20;
 
                     actuator_controls.control[8] = set_varpitchangle.motor_rpm;
 
@@ -2650,16 +2651,57 @@ MavlinkReceiver::handle_message_rotor_force_msg(mavlink_message_t *msg)
     mavlink_msg_set_rotor_force_target_decode(msg, &forces);
 
     struct rotor_force_s f = {};
+    struct offboard_control_mode_s offboard_control_mode = {};
 
-    f.timestamp = hrt_absolute_time();
-    for(int i=0;i<4;i++)
-        f.force[i] = forces.force[i];
+    bool values_finite =
+            PX4_ISFINITE(forces.force[0]) &&
+            PX4_ISFINITE(forces.force[1]) &&
+            PX4_ISFINITE(forces.force[2]) &&
+            PX4_ISFINITE(forces.force[3]);
 
-    if (_r_force_pub == nullptr) {
-        _r_force_pub = orb_advertise(ORB_ID(rotor_force), &f);
+    if ((mavlink_system.sysid == forces.target_system ||
+         forces.target_system == 0) &&
+        (mavlink_system.compid == forces.target_component ||
+         forces.target_component == 0) &&
+        values_finite) {
 
-    } else {
-        orb_publish(ORB_ID(rotor_force),  _r_force_pub, &f);
+            /* ignore all since we are setting raw actuators here */
+            offboard_control_mode.ignore_thrust             = true;
+            offboard_control_mode.ignore_attitude           = true;
+            offboard_control_mode.ignore_bodyrate           = true;
+            offboard_control_mode.ignore_position           = true;
+            offboard_control_mode.ignore_velocity           = true;
+            offboard_control_mode.ignore_acceleration_force = true;
+            offboard_control_mode.timestamp = hrt_absolute_time();
+
+            if (_offboard_control_mode_pub == nullptr) {
+                    _offboard_control_mode_pub = orb_advertise(ORB_ID(offboard_control_mode), &offboard_control_mode);
+
+            } else {
+                    orb_publish(ORB_ID(offboard_control_mode), _offboard_control_mode_pub, &offboard_control_mode);
+            }
+
+
+            /* If we are in offboard control mode, publish the rotor force controls */
+            bool updated;
+            orb_check(_control_mode_sub, &updated);
+
+            if (updated) {
+                    orb_copy(ORB_ID(vehicle_control_mode), _control_mode_sub, &_control_mode);
+            }
+
+            if (_control_mode.flag_control_offboard_enabled) {
+                f.timestamp = hrt_absolute_time();
+                for(int i=0;i<4;i++)
+                    f.force[i] = forces.force[i];
+
+                if (_r_force_pub == nullptr) {
+                    _r_force_pub = orb_advertise(ORB_ID(rotor_force), &f);
+
+                } else {
+                    orb_publish(ORB_ID(rotor_force),  _r_force_pub, &f);
+                }
+            }
     }
 }
 
