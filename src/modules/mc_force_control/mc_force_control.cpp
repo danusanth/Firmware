@@ -54,13 +54,20 @@ private:
     struct actuator_controls_s          _actuator_controls;     /**< actuator controls*/
 
     const double  _lift_const = 5.9467E-07;             /**< rotor lift const based on system idef. of the quad */
-    const double  _alpha_bound = 0.349065850000000;     /**< max/min rotor pitch angle of the quad */
+    const double  _alpha_bound = 0.26179938779915;     /**< max/min rotor pitch angle of the quad */
+    const double  _alpha_bound_max = 0.349065850398866;
     const float   _radtodeg = 57.2957795;               /**< for conversion*/
 
     /**
      * Check for changes in rotor force inputs.
      */
     void		rotor_force_poll();
+
+    /**
+     * Check if motorspeed & pitch angle are sufficent to create the desired force
+     * @return average motor speed
+     */
+    void		motorspeed_pitch_force_checker(float farr[], double pitch[], double* rpm);
 
     /**
       *Calculate average motorspeed based on lift const and rotor pitch boundaries.
@@ -72,7 +79,7 @@ private:
       *Calculate quad pitch angles based on rotorspeed and force.
       *@return array with pitch angles [0,3,4965]
       */
-    double*             pitch_angles(float arr[], int size, double rpm);
+    double*             pitch_angles(float arr[], int size, double &rpm);
 
     /**
       *Calculate the motorspeed command based on motorspeed and pitch angle
@@ -153,17 +160,36 @@ MulticopterForceControl::rotor_force_poll()
     }
 }
 
+void
+MulticopterForceControl::motorspeed_pitch_force_checker(float farr[], double pitch[], double* rpm){
+    double force;
+    double newrpm = *rpm;
+    int count = 0;
+    if(!(pitch[0]<= _alpha_bound_max && pitch[1] <= _alpha_bound_max && pitch[2] <= _alpha_bound_max && pitch[3] <= _alpha_bound_max)){
+        force = _lift_const*_alpha_bound_max*newrpm*newrpm;
+        double factor = sqrt(fabs((double)farr[std::distance(pitch,std::max_element(pitch,pitch+4))])/force);
+        newrpm = factor*newrpm;
+        PX4_INFO("#%d: New rpm %4.2f",count,newrpm);
+        count++;
+        for(int i=0;i<4;i++){
+            pitch[i] = ((double)farr[i]/(newrpm*newrpm*_lift_const));
+        }
+        *rpm = newrpm;
+    }
+}
+
 double
 MulticopterForceControl::motorspeed_average(float arr[], int size){
     float forcemax = *std::max_element(arr,arr+size);
     float forcemin = *std::min_element(arr,arr+size);
     double omegamax = sqrt(fabs((double)forcemax)/(_lift_const*_alpha_bound));
     double omegamin = sqrt(fabs((double)forcemin)/(_lift_const*_alpha_bound));
-    return std::max(omegamax,omegamin);
+    //return std::max(omegamax,omegamin);
+    return (omegamax+omegamin)/2;
 }
 
 double*
-MulticopterForceControl::pitch_angles(float arr[], int size, double rpm){
+MulticopterForceControl::pitch_angles(float arr[], int size, double &rpm){
     static double pitch[4];
     if(rpm > 0){
         for(int i=0;i<size;i++){
@@ -174,17 +200,20 @@ MulticopterForceControl::pitch_angles(float arr[], int size, double rpm){
             pitch[i] = 0;
         }
     }
+    motorspeed_pitch_force_checker(arr,pitch,&rpm);
     return pitch;
 }
 
 double
-MulticopterForceControl::motorspeed_command(double pitch[], int size, double rpm){
+MulticopterForceControl::motorspeed_command(double pitch[], int size, double 
+                                            rpm){
     double sum = 0;
     for (int i = 0; i < size; i++){
-        sum += pitch[i];
+        sum += fabs(pitch[i]);
     }
     sum = sum /size;
-    return ((rpm/(76.30+45.4928*sum))/50)-1;
+    //return value with a max of 1
+    return std::min(((rpm/(90-45.4928*sum))/50)-1,1.00); //std::min(((rpm/(76.30-45.4928*sum))/50)-1,1.00);
 }
 
 void
