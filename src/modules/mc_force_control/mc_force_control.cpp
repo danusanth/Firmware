@@ -165,7 +165,7 @@ MulticopterForceControl::motorspeed_pitch_force_checker(float farr[], double pit
     double force;
     double newrpm = *rpm;
     int count = 0;
-    if(!(pitch[0]<= _alpha_bound_max && pitch[1] <= _alpha_bound_max && pitch[2] <= _alpha_bound_max && pitch[3] <= _alpha_bound_max)){
+    if(!(fabs(pitch[0])<= _alpha_bound_max && fabs(pitch[1]) <= _alpha_bound_max && fabs(pitch[2]) <= _alpha_bound_max && fabs(pitch[3]) <= _alpha_bound_max)){
         force = _lift_const*_alpha_bound_max*newrpm*newrpm;
         double factor = sqrt(fabs((double)farr[std::distance(pitch,std::max_element(pitch,pitch+4))])/force);
         newrpm = factor*newrpm;
